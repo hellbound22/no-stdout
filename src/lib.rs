@@ -3,10 +3,10 @@
 use core::{
     fmt::{self},
     hint,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicU8, Ordering},
 };
 
-static STATE: AtomicUsize = AtomicUsize::new(UNINITIALIZED);
+static STATE: AtomicU8 = AtomicU8::new(UNINITIALIZED);
 static mut STDOUT: &dyn StdOut = &NopOut;
 
 /// A trait describes common operations with the stdout.
@@ -24,11 +24,11 @@ pub trait StdOut: Send + 'static {
 // Three different states can occur during the program lifecycle:
 //
 // The stdout is uninitialized yet.
-const UNINITIALIZED: usize = 0;
+const UNINITIALIZED: u8 = 0;
 // The stdout is initializing right now.
-const INITIALIZING: usize = 1;
+const INITIALIZING: u8 = 1;
 // The stdout has been initialized and currently is active.
-const INITIALIZED: usize = 2;
+const INITIALIZED: u8 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetStdoutError(());
@@ -59,18 +59,21 @@ impl StdOut for NopOut {
     }
 }
 
+pub fn atomic_cas_emulated(value: &AtomicU8, current: u8, new: u8) -> u8 {
+    avr_device::interrupt::free(|_| {
+        let old_value = value.load(Ordering::SeqCst);
+        if old_value == current {
+            value.store(new, Ordering::SeqCst);
+        }
+        old_value
+    })
+}
+
 fn set_stdout_inner<F>(stdout: F) -> Result<(), SetStdoutError>
 where
     F: FnOnce() -> &'static dyn StdOut,
 {
-    let old_state = match STATE.compare_exchange(
-        UNINITIALIZED,
-        INITIALIZING,
-        Ordering::SeqCst,
-        Ordering::SeqCst,
-    ) {
-        Ok(s) | Err(s) => s,
-    };
+    let old_state = atomic_cas_emulated(&STATE, UNINITIALIZED, INITIALIZING);
 
     match old_state {
         // The state was UNINITIALIZED and then changed to INITIALIZING.

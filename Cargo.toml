@@ -5,6 +5,10 @@ edition = "2018"
 
 [dependencies]
 
+[dependencies.avr-device]
+version = "0.6.0"
+features = ["atmega8"]
+
 [features]
 default = []
 dprint = []
